@@ -183,12 +183,12 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.a.valid := !s_acquire && s_release && s_pprobe
   io.schedule.bits.b.valid := !s_rprobe || !s_pprobe
   io.schedule.bits.c.valid := (!s_release && w_rprobeackfirst) || (!s_probeack && w_pprobeackfirst)
-  io.schedule.bits.d.valid := !s_execute && w_pprobeack && w_grant
+  io.schedule.bits.d.valid := !s_execute && w_pprobeack && w_grant && w_releaseack
   io.schedule.bits.e.valid := !s_grantack && w_grantfirst
   //io.schedule.bits.x.valid := !s_flush && w_releaseack
   io.schedule.bits.x.valid := Bool(false)
   io.schedule.bits.dir.valid := (!s_release && w_rprobeackfirst) || (!s_writeback && no_wait)
-  io.schedule.bits.reload := no_wait
+  io.schedule.bits.reload := no_wait && s_flush
   io.schedule.valid := io.schedule.bits.a.valid || io.schedule.bits.b.valid || io.schedule.bits.c.valid ||
                        io.schedule.bits.d.valid || io.schedule.bits.e.valid || io.schedule.bits.x.valid ||
                        io.schedule.bits.dir.valid
@@ -202,7 +202,8 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     when (w_releaseack)           { s_flush      := Bool(true) }
     when (w_pprobeackfirst)       { s_probeack   := Bool(true) }
     when (w_grantfirst)           { s_grantack   := Bool(true) }
-    when (w_pprobeack && w_grant) { s_execute    := Bool(true) }
+    when (w_pprobeack && w_grant &&
+          w_releaseack)           { s_execute    := Bool(true) }
     when (no_wait)                { s_writeback  := Bool(true) }
     // Await the next operation
     when (no_wait) {
@@ -211,7 +212,8 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     }
   }
 
-  when (flush_wait > 2.U && no_wait) {
+  /*
+  when (flush_wait > 4.U && no_wait) {
     s_flush := Bool(true)
     s_writeback  := Bool(true)
     request_valid := Bool(false)
@@ -219,7 +221,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     flush_wait := 0.U
   } .elsewhen (!s_flush && w_releaseack) {
     flush_wait := flush_wait + 1.U
-  }
+  }*/
 
   // Resulting meta-data
   val final_meta_writeback = Wire(init = meta)
@@ -286,7 +288,9 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   val honour_BtoT = meta.hit && (meta.clients & req_clientBit).orR
 
   // The client asking us to act is proof they don't have permissions.
-  val excluded_client = Mux(meta.hit && request.prio(0) && skipProbeN(request.opcode, params.cache.hintsSkipProbe), req_clientBit, UInt(0))
+  //val excluded_client = Mux(meta.hit && request.prio(0) && skipProbeN(request.opcode), req_clientBit, UInt(0))
+  val excluded_client = Mux(meta.hit && request.prio(0) && (skipProbeN(request.opcode, params.cache.hintsSkipProbe) || request.control),
+                            req_clientBit, UInt(0))
   io.schedule.bits.a.bits.tag     := request.tag
   io.schedule.bits.a.bits.set     := request.set
   io.schedule.bits.a.bits.param   := Mux(req_needT, Mux(meta.hit, BtoT, NtoT), NtoB)
@@ -305,6 +309,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.c.bits.way     := meta.way
   io.schedule.bits.c.bits.dirty   := meta.dirty
   io.schedule.bits.d.bits         := request
+  io.schedule.bits.d.bits.opcode  := Mux(request.control, ProbeAckData, request.opcode)
   io.schedule.bits.d.bits.param   := Mux(!req_acquire, request.param,
                                        MuxLookup(request.param, Wire(request.param), Seq(
                                          NtoB -> Mux(req_promoteT, NtoT, NtoB),
@@ -466,7 +471,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
 
   // Handle response messages
   val probe_bit = params.clientBit(io.sinkc.bits.source)
-  val last_probe = (probes_done | probe_bit) === (meta.clients & ~excluded_client)
+  val last_probe = ((probes_done | probe_bit) & ~excluded_client) === (meta.clients & ~excluded_client)
   val probe_toN = isToN(io.sinkc.bits.param)
   if (!params.firstLevel) when (io.sinkc.valid) {
     params.ccover( probe_toN && io.schedule.bits.b.bits.param === toB, "MSHR_PROBE_FULL", "Client downgraded to N when asked only to do B")
@@ -516,7 +521,8 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   val new_request = Mux(io.allocate.valid, allocate_as_full, request)
   val new_needT = needT(new_request.opcode, new_request.param)
   val new_clientBit = params.clientBit(new_request.source)
-  val new_skipProbe = Mux(skipProbeN(new_request.opcode, params.cache.hintsSkipProbe), new_clientBit, UInt(0))
+  //val new_skipProbe = Mux(skipProbeN(new_request.opcode), new_clientBit, UInt(0))
+  val new_skipProbe = Mux(skipProbeN(new_request.opcode, params.cache.hintsSkipProbe) || new_request.control, new_clientBit, UInt(0))
 
   val prior = cacheState(final_meta_writeback, Bool(true))
   def bypass(from: CacheState, cover: Boolean)(implicit sourceInfo: SourceInfo) {
@@ -597,13 +603,20 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     // For X channel requests (ie: flush)
     .elsewhen (new_request.control && Bool(params.control)) { // new_request.prio(0)
       s_flush := Bool(false)
+      s_execute := Bool(false)
+      meta.dirty := Bool(true)
       // Do we need to actually do something?
       when (new_meta.hit) {
         s_release := Bool(false)
         w_releaseack := Bool(false)
         // Do we need to shoot-down inner caches?
-        when (Bool(!params.firstLevel) && (new_meta.clients =/= UInt(0))) {
-          //s_rprobe := Bool(false)
+        when (Bool(!params.firstLevel) && 
+              (new_meta.clients & ~new_skipProbe) =/= UInt(0)) {
+          s_rprobe := Bool(false)
+          w_rprobeackfirst := Bool(false)
+          w_rprobeacklast := Bool(false)
+        }
+        when (new_request.opcode === ProbeAckData) {
           w_rprobeackfirst := Bool(false)
           w_rprobeacklast := Bool(false)
         }
