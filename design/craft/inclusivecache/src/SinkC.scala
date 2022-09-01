@@ -94,7 +94,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     val bs_adr = Wire(io.bs_adr)
     io.bs_adr <> Queue(bs_adr, 1, pipe=true)
     io.bs_dat.data   := RegEnable(c.bits.data,    bs_adr.fire())
-    bs_adr.valid     := io.way_valid && resp && (!first || (c.valid && hasData))
+    bs_adr.valid     := (resp && !isFlush || isFlush && io.way_valid) && (!first || (c.valid && hasData))
     //bs_adr.valid     := (isFlush || resp) && (!first || (c.valid && hasData))
     bs_adr.bits.noop := !c.valid
     bs_adr.bits.way  := io.way
@@ -131,7 +131,10 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     params.ccover(c.valid && !raw_resp && buf_block, "SINKC_BUF_STALL", "No space in putbuffer for beat")
     params.ccover(c.valid && !raw_resp && set_block, "SINKC_SET_STALL", "No space in putbuffer for request")
 
-    c.ready := Mux(raw_resp, !hasData || bs_adr.ready && io.way_valid, !req_block && !buf_block && !set_block)
+    c.ready := Mux(raw_resp, Mux(!raw_isFlush, !hasData || bs_adr.ready,
+                   !hasData || bs_adr.ready && io.way_valid),
+                   !req_block && !buf_block && !set_block)
+    //c.ready := Mux(raw_resp, !hasData || bs_adr.ready && io.way_valid, !req_block && !buf_block && !set_block)
     //c.ready := Mux(raw_resp, !hasData || bs_adr.ready, !req_block && !buf_block && !set_block)
 
     io.req.valid := (!resp || isFlush && !flushed) && c.valid && first && !buf_block && !set_block
