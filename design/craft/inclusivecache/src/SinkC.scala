@@ -20,6 +20,7 @@ package sifive.blocks.inclusivecache
 import Chisel._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
+import chisel3.dontTouch
 
 class SinkCResponse(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
@@ -94,7 +95,8 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     val bs_adr = Wire(io.bs_adr)
     io.bs_adr <> Queue(bs_adr, 1, pipe=true)
     io.bs_dat.data   := RegEnable(c.bits.data,    bs_adr.fire())
-    bs_adr.valid     := (resp && !isFlush || isFlush && io.way_valid) && (!first || (c.valid && hasData))
+    bs_adr.valid     := ((resp && !isFlush) || (isFlush && io.way_valid)) && (!first || (c.valid && hasData))
+    dontTouch(resp)
     //bs_adr.valid     := (isFlush || resp) && (!first || (c.valid && hasData))
     bs_adr.bits.noop := !c.valid
     bs_adr.bits.way  := io.way
