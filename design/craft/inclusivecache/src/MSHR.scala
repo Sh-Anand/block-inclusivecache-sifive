@@ -334,6 +334,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
                                          NtoT -> NtoT)))
   io.schedule.bits.d.bits.sink    := UInt(0)
   io.schedule.bits.d.bits.way     := meta.way
+  io.schedule.bits.d.bits.dirty   := meta.dirty
   io.schedule.bits.d.bits.bad     := bad_grant
   io.schedule.bits.e.bits.sink    := sink
   io.schedule.bits.x.bits.fail    := Bool(false)

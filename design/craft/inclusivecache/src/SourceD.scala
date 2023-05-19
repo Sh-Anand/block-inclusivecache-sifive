@@ -28,6 +28,7 @@ class SourceDRequest(params: InclusiveCacheParameters) extends FullRequest(param
 {
   val sink = UInt(width = params.inner.bundle.sinkBits)
   val way  = UInt(width = params.wayBits)
+  val dirty = Bool()
   val bad  = Bool()
 }
 
@@ -212,7 +213,7 @@ class SourceD(params: InclusiveCacheParameters) extends Module
   val s3_rdata = bypass(s3_bypass, s3_bypass_data, queue.io.deq.bits.data)
 
   // Lookup table for response codes
-  val grant = Mux(s3_req.param === BtoT, Grant, GrantData)
+  val grant = Mux(s3_req.param === BtoT, Grant, Mux(s3_req.dirty, GrantDataDirty, GrantData))
   val resp_opcode = Vec(Seq(AccessAck, AccessAck, AccessAckData, AccessAckData, AccessAckData, HintAck, grant, Grant))
 
   // No restrictions on the type of buffer used here

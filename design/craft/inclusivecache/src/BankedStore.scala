@@ -24,6 +24,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.DescribedSRAM
 
 import scala.math.{max, min}
+import chisel3.dontTouch
 
 abstract class BankedStoreAddress(val inner: Boolean, params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
@@ -152,6 +153,9 @@ class BankedStore(params: InclusiveCacheParameters) extends Module
 
   // See the comments above for why this prioritization is used
   val reqs = Seq(sinkC_req, sourceC_req, sinkD_req, sourceD_wreq, sourceD_rreq)
+
+  dontTouch(sinkC_req)
+
 
   // Connect priorities; note that even if a request does not go through due to failing
   // to obtain a needed subbank, it still blocks overlapping lower priority requests.
