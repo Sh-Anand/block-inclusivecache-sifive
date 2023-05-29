@@ -41,6 +41,7 @@ class SinkX(params: InclusiveCacheParameters) extends Module
 
   io.req.bits.prio   := Vec(UInt(1, width=3).asBools) // same prio as A
   io.req.bits.control:= Bool(true)
+  io.req.bits.control1 := Bool(false)
   io.req.bits.opcode := UInt(0)
   io.req.bits.param  := UInt(0)
   io.req.bits.size   := UInt(params.offsetBits)

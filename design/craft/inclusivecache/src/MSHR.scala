@@ -24,6 +24,7 @@ import TLPermissions._
 import TLMessages._
 import MetaData._
 import chisel3.PrintableHelper
+import chisel3.dontTouch
 
 class ScheduleRequest(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
@@ -87,6 +88,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     val status    = Valid(new MSHRStatus(params))
     val schedule  = Decoupled(new ScheduleRequest(params))
     val sinkc     = Valid(new SinkCResponse(params)).flip
+    val sinkc_bs_fire = Bool().flip
     val sinkd     = Valid(new SinkDResponse(params)).flip
     val sinke     = Valid(new SinkEResponse(params)).flip
     val nestedwb  = new NestedWriteback(params).flip
@@ -159,8 +161,10 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     when (io.nestedwb.b_toN) { meta.hit := Bool(false) }
   }
 
+  val s2_req_control1 = RegNext(RegNext(RegNext(request.control1)))
+  val s2_req_valid = RegNext(RegNext(RegNext(request_valid)))
   // Scheduler status
-  io.status.valid := request_valid
+  io.status.valid := request_valid //Mux(s2_req_control1, s2_req_valid, request_valid) 
   io.status.bits.set    := request.set
   io.status.bits.tag    := request.tag
   io.status.bits.way    := meta.way
@@ -182,7 +186,16 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   val no_wait = w_rprobeacklast && w_releaseack && w_grantlast && w_pprobeacklast && w_grantack
   io.schedule.bits.a.valid := !s_acquire && s_release && s_pprobe
   io.schedule.bits.b.valid := !s_rprobe || !s_pprobe
-  io.schedule.bits.c.valid := (!s_release && w_rprobeackfirst) || (!s_probeack && w_pprobeackfirst)
+
+  val c_valid = (!s_release && w_rprobeackfirst) || (!s_probeack && w_pprobeackfirst)
+  val c_valid_wb = RegInit(Bool(false)) // severe hack, try to integrate this with c_valid
+  val c_flushed = RegInit(Bool(false))
+  when (io.sinkc_bs_fire && !c_flushed) {
+    c_valid_wb := Bool(true)
+    c_flushed := Bool(true)
+  }
+  
+  io.schedule.bits.c.valid := Mux(request.control1 && request.opcode === ProbeAckData, c_valid_wb, c_valid) // RegNext(RegNext(RegNext(c_valid)))
   io.schedule.bits.d.valid := !s_execute && w_pprobeack && w_grant && w_releaseack
   io.schedule.bits.e.valid := !s_grantack && w_grantfirst
   //io.schedule.bits.x.valid := !s_flush && w_releaseack
@@ -195,6 +208,9 @@ class MSHR(params: InclusiveCacheParameters) extends Module
 
   // Schedule completions
   when (io.schedule.ready) {
+    when(c_valid_wb) { // important because setting and unsetting can happen in the same cycle
+      c_valid_wb := Bool(false)
+    }
                                     s_rprobe     := Bool(true)
     when (w_rprobeackfirst)       { s_release    := Bool(true) }
                                     s_pprobe     := Bool(true)
@@ -207,6 +223,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     when (no_wait)                { s_writeback  := Bool(true) }
     // Await the next operation
     when (no_wait) {
+      c_flushed := Bool(false)
       request_valid := Bool(false)
       meta_valid := Bool(false)
     }
@@ -279,9 +296,9 @@ class MSHR(params: InclusiveCacheParameters) extends Module
 
   val invalid = Wire(new DirectoryEntry(params))
   invalid.dirty   := Bool(false)
-  invalid.state   := INVALID
-  invalid.clients := UInt(0)
-  invalid.tag     := UInt(0)
+  invalid.state   := Mux(request.control1, Mux(request.opcode === ProbeAckData, TRUNK, TIP), INVALID)
+  invalid.clients := Mux(request.control1, meta.clients, UInt(0))
+  invalid.tag     := Mux(request.control1, meta.tag, UInt(0))
 
   // Just because a client says BtoT, by the time we process the request he may be N.
   // Therefore, we must consult our own meta-data state to confirm he owns the line still.
@@ -297,12 +314,12 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.a.bits.block   := request.size =/= UInt(log2Ceil(params.cache.blockBytes)) ||
                                      !(request.opcode === PutFullData || request.opcode === AcquirePerm)
   io.schedule.bits.a.bits.source  := UInt(0)
-  io.schedule.bits.b.bits.param   := Mux(!s_rprobe, toN, Mux(request.prio(1), request.param, Mux(req_needT, toN, toB)))
+  io.schedule.bits.b.bits.param   := Mux(request.control1, toB, Mux(!s_rprobe, toN, Mux(request.prio(1), request.param, Mux(req_needT, toN, toB))))
   io.schedule.bits.b.bits.tag     := Mux(!s_rprobe, meta.tag, request.tag)
   io.schedule.bits.b.bits.set     := request.set
   io.schedule.bits.b.bits.clients := meta.clients & ~excluded_client
   io.schedule.bits.c.bits.opcode  := Mux(meta.dirty, ReleaseData, Release)
-  io.schedule.bits.c.bits.param   := Mux(meta.state === BRANCH, BtoN, TtoN)
+  io.schedule.bits.c.bits.param   := Mux(meta.state === BRANCH, BtoN, Mux(request.control1, TtoB, TtoN))
   io.schedule.bits.c.bits.source  := UInt(0)
   io.schedule.bits.c.bits.tag     := meta.tag
   io.schedule.bits.c.bits.set     := request.set
@@ -611,12 +628,12 @@ class MSHR(params: InclusiveCacheParameters) extends Module
         w_releaseack := Bool(false)
         // Do we need to shoot-down inner caches?
         when (Bool(!params.firstLevel) && 
-              (new_meta.clients & ~new_skipProbe) =/= UInt(0)) {
+              (new_meta.clients & ~new_skipProbe) =/= UInt(0) && !(new_request.control1 && !(new_meta.state === TRUNK))) {
           s_rprobe := Bool(false)
           w_rprobeackfirst := Bool(false)
           w_rprobeacklast := Bool(false)
         }
-        when (new_request.opcode === ProbeAckData) {
+        when (new_request.opcode === ProbeAckData && !new_request.control1) {
           w_rprobeackfirst := Bool(false)
           w_rprobeacklast := Bool(false)
         }
