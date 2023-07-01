@@ -188,14 +188,14 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.b.valid := !s_rprobe || !s_pprobe
 
   val c_valid = (!s_release && w_rprobeackfirst) || (!s_probeack && w_pprobeackfirst)
-  val c_valid_wb = RegInit(Bool(false)) // severe hack, try to integrate this with c_valid
-  val c_flushed = RegInit(Bool(false))
-  when (io.sinkc_bs_fire && !c_flushed) {
-    c_valid_wb := Bool(true)
-    c_flushed := Bool(true)
-  }
+  // val c_valid_wb = RegInit(Bool(false)) // severe hack, try to integrate this with c_valid
+  // val c_flushed = RegInit(Bool(false))
+  // when (io.sinkc_bs_fire && !c_flushed) {
+  //   c_valid_wb := Bool(true)
+  //   c_flushed := Bool(true)
+  // }
   
-  io.schedule.bits.c.valid := Mux(request.control1 && request.opcode === ProbeAckData, c_valid_wb, c_valid) // RegNext(RegNext(RegNext(c_valid)))
+  io.schedule.bits.c.valid := c_valid//Mux(request.control1 && request.opcode === ProbeAckData, c_valid_wb, c_valid) // RegNext(RegNext(RegNext(c_valid)))
   io.schedule.bits.d.valid := !s_execute && w_pprobeack && w_grant && w_releaseack
   io.schedule.bits.e.valid := !s_grantack && w_grantfirst
   //io.schedule.bits.x.valid := !s_flush && w_releaseack
@@ -208,9 +208,9 @@ class MSHR(params: InclusiveCacheParameters) extends Module
 
   // Schedule completions
   when (io.schedule.ready) {
-    when(c_valid_wb) { // important because setting and unsetting can happen in the same cycle
-      c_valid_wb := Bool(false)
-    }
+    // when(c_valid_wb) { // important because setting and unsetting can happen in the same cycle
+    //   c_valid_wb := Bool(false)
+    // }
                                     s_rprobe     := Bool(true)
     when (w_rprobeackfirst)       { s_release    := Bool(true) }
                                     s_pprobe     := Bool(true)
@@ -223,22 +223,12 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     when (no_wait)                { s_writeback  := Bool(true) }
     // Await the next operation
     when (no_wait) {
-      c_flushed := Bool(false)
+      // c_flushed := Bool(false)
       request_valid := Bool(false)
       meta_valid := Bool(false)
     }
   }
 
-  /*
-  when (flush_wait > 4.U && no_wait) {
-    s_flush := Bool(true)
-    s_writeback  := Bool(true)
-    request_valid := Bool(false)
-    meta_valid := Bool(false)
-    flush_wait := 0.U
-  } .elsewhen (!s_flush && w_releaseack) {
-    flush_wait := flush_wait + 1.U
-  }*/
 
   // Resulting meta-data
   val final_meta_writeback = Wire(init = meta)
@@ -568,6 +558,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     request := io.allocate.bits
   }
 
+  dontTouch(new_request)
   // Create execution plan
   when (io.directory.valid || (io.allocate.valid && io.allocate.bits.repeat)) {
     meta_valid := Bool(true)
@@ -628,12 +619,12 @@ class MSHR(params: InclusiveCacheParameters) extends Module
         w_releaseack := Bool(false)
         // Do we need to shoot-down inner caches?
         when (Bool(!params.firstLevel) && 
-              (new_meta.clients & ~new_skipProbe) =/= UInt(0) && !(new_request.control1 && !(new_meta.state === TRUNK))) {
+              (new_meta.clients & ~new_skipProbe) =/= UInt(0)) {
           s_rprobe := Bool(false)
           w_rprobeackfirst := Bool(false)
           w_rprobeacklast := Bool(false)
         }
-        when (new_request.opcode === ProbeAckData && !new_request.control1) {
+        when (new_request.opcode === ProbeAckData) {
           w_rprobeackfirst := Bool(false)
           w_rprobeacklast := Bool(false)
         }
