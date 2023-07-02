@@ -294,7 +294,7 @@ object InclusiveCacheParameters
   }
   def all_mshrs(cache: CacheParameters, micro: InclusiveCacheMicroParameters): Int =
     // We need a dedicated MSHR for B+C each
-    2 + out_mshrs(cache, micro)
+    2 + out_mshrs(cache, micro) + 5
 }
 
 class InclusiveCacheBundle(params: InclusiveCacheParameters) extends GenericParameterizedBundle(params)
