@@ -284,7 +284,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module
       m.io.allocate.bits.repeat := Bool(false)
     }
   }
-
+  
   dontTouch(request)
 
   when (request.valid && nestB && !bc_mshr.io.status.valid && !c_mshr.io.status.valid && !mshr_uses_directory_assuming_no_bypass) {

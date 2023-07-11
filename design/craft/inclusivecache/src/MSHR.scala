@@ -47,6 +47,7 @@ class MSHRStatus(params: InclusiveCacheParameters) extends InclusiveCacheBundle(
   val nestB  = Bool()
   val blockC = Bool()
   val nestC  = Bool()
+  val source = UInt(width = params.inner.bundle.sourceBits)
 }
 
 class NestedWriteback(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
@@ -170,6 +171,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.status.bits.way    := meta.way
   io.status.bits.blockB := !meta_valid || ((!w_releaseack || !w_rprobeacklast || !w_pprobeacklast) && !w_grantfirst)
   io.status.bits.nestB  := meta_valid && w_releaseack && w_rprobeacklast && w_pprobeacklast && !w_grantfirst
+  io.status.bits.source := request.source
   // The above rules ensure we will block and not nest an outer probe while still doing our
   // own inner probes. Thus every probe wakes exactly one MSHR.
   io.status.bits.blockC := !meta_valid
@@ -478,9 +480,9 @@ class MSHR(params: InclusiveCacheParameters) extends Module
 
   // Handle response messages
   val probe_bit = params.clientBit(io.sinkc.bits.source)
-  val last_probe = ((probes_done | probe_bit) & ~excluded_client) === (meta.clients & ~excluded_client)
+  val last_probe = (((probes_done | probe_bit) & ~excluded_client) === (meta.clients & ~excluded_client))
   val probe_toN = isToN(io.sinkc.bits.param)
-  if (!params.firstLevel) when (io.sinkc.valid) {
+  if (!params.firstLevel) when (io.sinkc.valid && io.sinkc.bits.param =/= FLUSH && io.sinkc.bits.param =/= FLUSH_WB) {
     params.ccover( probe_toN && io.schedule.bits.b.bits.param === toB, "MSHR_PROBE_FULL", "Client downgraded to N when asked only to do B")
     params.ccover(!probe_toN && io.schedule.bits.b.bits.param === toB, "MSHR_PROBE_HALF", "Client downgraded to B when asked only to do B")
     // Caution: the probe matches us only in set.
@@ -624,10 +626,10 @@ class MSHR(params: InclusiveCacheParameters) extends Module
           w_rprobeackfirst := Bool(false)
           w_rprobeacklast := Bool(false)
         }
-        when (new_request.opcode === ProbeAckData) {
-          w_rprobeackfirst := Bool(false)
-          w_rprobeacklast := Bool(false)
-        }
+        // when (new_request.opcode === ProbeAckData) {
+        //   w_rprobeackfirst := Bool(false)
+        //   w_rprobeacklast := Bool(false)
+        // }
       }
     }
     // For A channel requests
