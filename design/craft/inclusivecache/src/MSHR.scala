@@ -203,7 +203,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   //io.schedule.bits.x.valid := !s_flush && w_releaseack
   io.schedule.bits.x.valid := Bool(false)
   io.schedule.bits.dir.valid := (!s_release && w_rprobeackfirst) || (!s_writeback && no_wait)
-  io.schedule.bits.reload := no_wait && s_flush
+  io.schedule.bits.reload := no_wait
   io.schedule.valid := io.schedule.bits.a.valid || io.schedule.bits.b.valid || io.schedule.bits.c.valid ||
                        io.schedule.bits.d.valid || io.schedule.bits.e.valid || io.schedule.bits.x.valid ||
                        io.schedule.bits.dir.valid
