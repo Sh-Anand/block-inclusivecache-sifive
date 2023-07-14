@@ -100,6 +100,12 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   val meta_valid = RegInit(Bool(false))
   val meta = Reg(new DirectoryResult(params))
 
+  val bs_adr_fire = RegInit(Bool(false))
+
+  when (io.sinkc_bs_fire) {
+    bs_adr_fire := Bool(true)
+  }
+
   // Define which states are valid
   // when (meta_valid) {
   //   when (meta.state === INVALID) {
@@ -197,7 +203,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   //   c_flushed := Bool(true)
   // }
   
-  io.schedule.bits.c.valid := c_valid//Mux(request.control1 && request.opcode === ProbeAckData, c_valid_wb, c_valid) // RegNext(RegNext(RegNext(c_valid)))
+  io.schedule.bits.c.valid := Mux(request.control, (bs_adr_fire || request.opcode =/= ProbeAckData || request.from_buffer) && c_valid, c_valid) //Mux(request.control1 && request.opcode === ProbeAckData, c_valid_wb, c_valid) // RegNext(RegNext(RegNext(c_valid)))
   io.schedule.bits.d.valid := !s_execute && w_pprobeack && w_grant && w_releaseack
   io.schedule.bits.e.valid := !s_grantack && w_grantfirst
   //io.schedule.bits.x.valid := !s_flush && w_releaseack
@@ -214,7 +220,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     //   c_valid_wb := Bool(false)
     // }
                                     s_rprobe     := Bool(true)
-    when (w_rprobeackfirst)       { s_release    := Bool(true) }
+    when (w_rprobeackfirst && (!(request.control && !bs_adr_fire) || request.from_buffer || request.opcode =/= ProbeAckData))       { s_release    := Bool(true) }
                                     s_pprobe     := Bool(true)
     when (s_release && s_pprobe)  { s_acquire    := Bool(true) }
     when (w_releaseack)           { s_flush      := Bool(true) }
@@ -558,6 +564,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     assert (!request_valid || (no_wait && io.schedule.fire()))
     request_valid := Bool(true)
     request := io.allocate.bits
+    bs_adr_fire := Bool(false)
   }
 
   dontTouch(new_request)

@@ -232,6 +232,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module
     m.io.allocate.bits := Mux(bypass, Wire(new QueuedRequest(params), init = request.bits), requests.io.data)
     m.io.allocate.bits.set := m.io.status.bits.set
     m.io.allocate.bits.repeat := m.io.allocate.bits.tag === m.io.status.bits.tag
+    m.io.allocate.bits.from_buffer := !bypass
     m.io.allocate.valid := sel && will_reload
   }
 
@@ -285,6 +286,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module
       m.io.allocate.valid := Bool(true)
       m.io.allocate.bits := request.bits
       m.io.allocate.bits.repeat := Bool(false)
+      m.io.allocate.bits.from_buffer := Bool(false)
     }
   }
   
@@ -294,6 +296,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module
     bc_mshr.io.allocate.valid := Bool(true)
     bc_mshr.io.allocate.bits := request.bits
     bc_mshr.io.allocate.bits.repeat := Bool(false)
+    bc_mshr.io.allocate.bits.from_buffer := Bool(false)
     assert (!request.bits.prio(0))
   }
   bc_mshr.io.allocate.bits.prio(0) := Bool(false)
@@ -302,6 +305,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module
     c_mshr.io.allocate.valid := Bool(true)
     c_mshr.io.allocate.bits := request.bits
     c_mshr.io.allocate.bits.repeat := Bool(false)
+    c_mshr.io.allocate.bits.from_buffer := Bool(false)
     assert (!request.bits.prio(0))
     assert (!request.bits.prio(1))
   }
@@ -331,7 +335,7 @@ class Scheduler(params: InclusiveCacheParameters) extends Module
 
   // wire MSHRs to sinkC bs_adr fire
   for (i <- 0 until params.mshrs) {
-    mshrs(i).io.sinkc_bs_fire := mshrs(i).io.status.valid && mshrs(i).io.status.bits.set === sinkC.io.set && sinkC.io.bs_adr.fire
+    mshrs(i).io.sinkc_bs_fire := (mshrs(i).io.status.valid && mshrs(i).io.status.bits.set === sinkC.io.bs_set && sinkC.io.bs_adr.fire) //|| (sinkC.io.opcode =/= TLMessages.ProbeAckData)
   }
 
   // Beat buffer connections between components

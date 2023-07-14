@@ -47,6 +47,8 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     // Find 'way' via MSHR CAM lookup
     val set = UInt(width = params.setBits)
     val way = UInt(width = params.wayBits).flip
+    val opcode = UInt(width = 3.W)
+    val bs_set = UInt(width = params.setBits)
     val way_valid = Bool().flip
     // ProbeAck write-back
     val bs_adr = Decoupled(new BankedStoreInnerAddress(params))
@@ -91,6 +93,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     assert (!(c.valid && c.bits.corrupt), "Data poisoning unavailable")
 
     io.set := Mux(c.valid, set, RegEnable(set, c.valid)) // finds us the way
+    io.opcode := Mux(c.valid, c.bits.opcode, RegEnable(c.bits.opcode, c.valid))
 
     // Cut path from inner C to the BankedStore SRAM setup
     //   ... this makes it easier to layout the L2 data banks far away
@@ -140,7 +143,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     params.ccover(c.valid && !(raw_resp && !isFlush) && set_block, "SINKC_SET_STALL", "No space in putbuffer for request")
 
     c.ready := Mux(raw_resp, Mux(!raw_isFlush, !hasData || bs_adr.ready,
-                   (!hasData && !req_block) || (hasData && bs_adr.ready && !req_block)),
+                   (!hasData && !req_block) || (hasData && bs_adr.ready && io.way_valid && !req_block)),
                    !req_block && !buf_block && !set_block)
 
 
@@ -171,7 +174,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     io.req.bits.tag    := tag
     io.req.bits.put    := put
 
-
+    io.bs_set := io.bs_adr.bits.set
 
     putbuffer.io.push.bits.index := put
     putbuffer.io.push.bits.data.data    := c.bits.data
